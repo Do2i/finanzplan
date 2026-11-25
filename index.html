@@ -1044,6 +1044,18 @@
         .sheet-body .big-btn + .big-btn { margin-top: 10px; }
         .sheet-body .big-btn + .hint, .sheet-body .hint + .big-btn { margin-top: 12px; }
         .hint a { color: var(--blue); }
+    
+        /* Farbauswahl für Budget-Posten */
+        .color-group { margin: 0 0 16px; }
+        .color-title { font-size: 13px; color: var(--label-2); margin: 0 4px 8px; }
+        .color-pick { display: flex; flex-wrap: wrap; gap: 10px; padding: 2px 4px; }
+        .color-pick button {
+            width: 30px; height: 30px; border-radius: 50%; border: none; cursor: pointer;
+            background: var(--c); box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.08);
+            transition: transform 0.15s ease;
+        }
+        .color-pick button:hover { transform: scale(1.08); }
+        .color-pick button.active { box-shadow: 0 0 0 2px var(--sheet-bg, #fff), 0 0 0 4px var(--c); }
     </style>
 </head>
 <body>
@@ -1418,7 +1430,8 @@
             name: String(b.name ?? ''),
             ein: isBlank(b.ein) ? '' : num(b.ein),
             aus: isBlank(b.aus) ? '' : num(b.aus),
-            isFixLink: !!b.isFixLink
+            isFixLink: !!b.isFixLink,
+            color: typeof b.color === 'string' ? b.color : ''
         }));
     }
 
@@ -1437,7 +1450,7 @@
         };
         return {
             rows: state.rows.map(r => [r.name, r.total, r.d, r.s]),
-            budgetRows: state.budget.map(b => ({ name: b.name, ein: b.ein, aus: b.aus, isFixLink: b.isFixLink })),
+            budgetRows: state.budget.map(b => ({ name: b.name, ein: b.ein, aus: b.aus, isFixLink: b.isFixLink, ...(b.color ? { color: b.color } : {}) })),
             gehalt: find('gehalt', 'ein', 0),
             sparen: find('sparen', 'aus', 0),
             fun: find('fun', 'aus', 0),
@@ -1549,6 +1562,37 @@
     /* ==========================================================================
        RENDER: BUDGET
        ========================================================================== */
+    /* Farben für eigene Budget-Posten (Sparen, Fun, Essen …). Fix Kosten ist immer blau, Einnahmen grün.
+       Gespeichert wird nur der Name der Farbe (z. B. "orange"), damit Mac, Windows und Handy gleich aussehen. */
+    const BUDGET_COLORS = [
+        { key: 'indigo', label: 'Indigo', css: '#8B88EC' },
+        { key: 'teal', label: 'Türkis', css: '#5FC3D3' },
+        { key: 'orange', label: 'Orange', css: '#F2A65E' },
+        { key: 'pink', label: 'Pink', css: '#EE87A4' },
+        { key: 'purple', label: 'Lila', css: '#B48CDB' },
+        { key: 'green', label: 'Grün', css: '#71C68E' },
+        { key: 'yellow', label: 'Gelb', css: '#EFCB61' },
+        { key: 'red', label: 'Rot', css: '#EA8078' },
+        { key: 'brown', label: 'Braun', css: '#B39B80' },
+        { key: 'gray', label: 'Grau', css: '#A4A4AC' }
+    ];
+    const BUDGET_FIX_COLOR = '#6FA6F2';   // Fix Kosten (Balken), ruhiges Blau
+    const BUDGET_REST_COLOR = '#71C68E';  // Verbleibend (Balken)
+    /** Farbname eines Postens: selbst gewählt oder automatisch der Reihe nach. */
+    function budgetColorKey(b) {
+        if (b.isFixLink) return 'blue';
+        if (b.color && BUDGET_COLORS.some(c => c.key === b.color)) return b.color;
+        const own = state.budget.filter(x => !x.isFixLink && num(x.ein) === 0);
+        const i = Math.max(0, own.indexOf(b));
+        return BUDGET_COLORS[i % BUDGET_COLORS.length].key;
+    }
+    function budgetColor(b) {
+        if (b.isFixLink) return BUDGET_FIX_COLOR;
+        if (num(b.ein) !== 0) return BUDGET_REST_COLOR;
+        const key = budgetColorKey(b);
+        return (BUDGET_COLORS.find(c => c.key === key) || BUDGET_COLORS[0]).css;
+    }
+
     function renderBudget(highlightId, totals) {
         const t = totals || computeTotals();
         const list = $('budget-list');
@@ -1565,7 +1609,8 @@
                 amount = '+' + fmtEUR(num(b.ein));
                 amountCls = ' in';
             } else {
-                lead = `<div class="badge-icon out">${ICON.out}</div>`;
+                const c = budgetColor(b);
+                lead = `<div class="badge-icon out" style="background: color-mix(in srgb, ${c} 18%, transparent); color: ${c};">${ICON.out}</div>`;
                 sub = isBlank(b.aus) || num(b.aus) === 0 ? 'Kein Betrag' : 'Ausgabe';
                 amount = fmtEUR(num(b.aus));
             }
@@ -1939,12 +1984,16 @@
                     <div class="field"><input class="left" id="b-name" type="text" placeholder="Name, z. B. Urlaub" value="${esc(b.name)}" autocomplete="off"></div>
                     <div class="field"><label>Betrag</label><input id="b-amount" type="text" inputmode="decimal" placeholder="0" value="${toInput(amount, isNew)}"><span class="suffix">€</span></div>
                 </div>
+                <div class="color-group" id="b-color-group"${type === 'ein' ? ' hidden' : ''}>
+                    <div class="color-title">Farbe</div>
+                    <div class="color-pick" id="b-color">${BUDGET_COLORS.map(c => `<button type="button" data-key="${c.key}" title="${c.label}" aria-label="${c.label}" style="--c: ${c.css}"></button>`).join('')}</div>
+                </div>
                 ${isNew ? '' : `<button class="big-btn destructive" id="b-delete">${ICON.trash}Posten löschen</button>`}
             `,
             onDone: () => {
                 const name = $('b-name').value.trim();
                 const val = parseNum($('b-amount').value);
-                const data = { name, ein: type === 'ein' ? val : '', aus: type === 'aus' ? val : '' };
+                const data = { name, ein: type === 'ein' ? val : '', aus: type === 'aus' ? val : '', color: pickedColor };
                 let hid;
                 if (isNew) { const item = { id: newId(), isFixLink: false, ...data }; state.budget.push(item); hid = item.id; }
                 else { Object.assign(existing, data); hid = existing.id; }
@@ -1955,7 +2004,19 @@
             }
         });
 
-        initSegmented($('b-type'), (v) => { type = v; });
+        initSegmented($('b-type'), (v) => { type = v; $('b-color-group').hidden = v === 'ein'; });
+        // Farbe: vorausgewählt ist die jetzige (auch die automatische), ein Tipp wählt eine andere
+        let pickedColor = existing ? (existing.color || '') : '';
+        const shownColor = existing ? budgetColorKey(existing) : BUDGET_COLORS[state.budget.filter(x => !x.isFixLink && num(x.ein) === 0).length % BUDGET_COLORS.length].key;
+        if (!existing) pickedColor = shownColor;
+        $('b-color').querySelectorAll('button').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.key === shownColor);
+            btn.onclick = () => {
+                pickedColor = btn.dataset.key;
+                $('b-color').querySelectorAll('button').forEach(x => x.classList.toggle('active', x === btn));
+                haptic();
+            };
+        });
         selectOnFocus($('sheet'));
         if (existing) $('b-delete').onclick = () => { closeSheet(); setTimeout(() => deleteBudgetRow(existing.id), 250); };
         if (isNew) setTimeout(() => $('b-name')?.focus(), 380);

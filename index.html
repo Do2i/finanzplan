@@ -2500,7 +2500,10 @@
                 const remote = await getRemote(cfg);
                 if (remote && remote.sha !== cfg.sha) {
                     const payload = JSON.parse(await unseal(cfg.key, remote.file));
-                    if (cfg.dirty) {
+                    const content = (p) => JSON.stringify([p.rows, p.budgetRows]);
+                    if (content(payload) === content(localPayload())) {
+                        cfg.dirty = false;           // gleicher Inhalt, nur neue Version auf GitHub
+                    } else if (cfg.dirty) {
                         // Hier und auf einem anderen Gerät geändert: neuerer Stand gewinnt, der andere wird Zwischenstand.
                         const mine = localPayload();
                         if ((payload.updatedAt || '') > (mine.updatedAt || '')) {
